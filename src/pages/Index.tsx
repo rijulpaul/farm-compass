@@ -6,6 +6,7 @@ import iconGrain from "@/assets/icon-grain.png";
 import iconSun from "@/assets/icon-sun.png";
 import iconSoil from "@/assets/icon-soil.png";
 import harvestFlatlay from "@/assets/harvest-flatlay.jpg";
+import ToolsSection from "@/components/ToolsSection";
 
 type Lang = "en" | "hi" | "mr";
 
