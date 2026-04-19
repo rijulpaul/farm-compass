@@ -384,6 +384,9 @@ const Index = () => {
         </div>
       </section>
 
+      {/* TOOLS — interactive feature playground */}
+      <ToolsSection />
+
       {/* PROOF / STATS */}
       <section className="py-20 md:py-28 bg-primary text-primary-foreground relative overflow-hidden">
         <div className="absolute inset-0 opacity-10">
