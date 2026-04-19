@@ -238,12 +238,14 @@ const Index = () => {
               </p>
 
               <div className="mt-8 flex flex-col sm:flex-row gap-3">
-                <Button size="lg" className="rounded-full bg-primary hover:bg-primary/90 h-14 px-8 text-base shadow-card group">
-                  {t.ctaPrimary}
-                  <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-smooth" />
+                <Button asChild size="lg" className="rounded-full bg-primary hover:bg-primary/90 h-14 px-8 text-base shadow-card group">
+                  <a href="#tools">
+                    {t.ctaPrimary}
+                    <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-smooth" />
+                  </a>
                 </Button>
-                <Button size="lg" variant="ghost" className="rounded-full h-14 px-6 text-base hover:bg-secondary">
-                  {t.ctaSecondary}
+                <Button asChild size="lg" variant="ghost" className="rounded-full h-14 px-6 text-base hover:bg-secondary">
+                  <a href="#how">{t.ctaSecondary}</a>
                 </Button>
               </div>
 
@@ -485,9 +487,11 @@ const Index = () => {
                 {t.ctaTitle}
               </h2>
               <p className="text-muted-foreground text-lg mb-8">{t.ctaSub}</p>
-              <Button size="lg" className="rounded-full bg-primary hover:bg-primary/90 h-14 px-10 text-base shadow-card">
-                {t.ctaPrimary}
-                <ArrowRight className="ml-2 w-4 h-4" />
+              <Button asChild size="lg" className="rounded-full bg-primary hover:bg-primary/90 h-14 px-10 text-base shadow-card">
+                <a href="#tools">
+                  {t.ctaPrimary}
+                  <ArrowRight className="ml-2 w-4 h-4" />
+                </a>
               </Button>
             </div>
           </div>
