@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from "react";
-import { Sprout, BarChart3, MessageCircle, MapPin, Wand2, Send, Leaf, Bot, User, ArrowRight } from "lucide-react";
+import { Sprout, BarChart3, MessageCircle, MapPin, Wand2, Send, Leaf, Bot, User, ArrowRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,18 @@ import {
   predictYield,
   assistantReply,
 } from "@/lib/farming";
+import { apiRecommend, apiYield } from "@/lib/api";
+
+// Map an arbitrary backend crop name string to one of our local CROP entries
+// (so we can show emoji, sowing info, and "why this crop" reasons).
+function findCropByName(name: string) {
+  const n = name.toLowerCase().trim();
+  return (
+    CROPS.find((c) => c.name.toLowerCase() === n) ||
+    CROPS.find((c) => c.id.toLowerCase() === n) ||
+    CROPS.find((c) => c.name.toLowerCase().includes(n) || n.includes(c.id.toLowerCase()))
+  );
+}
 
 type Tool = "recommend" | "yield" | "chat";
 
@@ -107,9 +119,12 @@ function RecommendPanel({
   const [k, setK] = useState(50);
   const [ph, setPh] = useState(6.5);
   const [temp, setTemp] = useState(27);
+  const [humidity, setHumidity] = useState(65);
   const [rainfall, setRainfall] = useState(900);
   const [results, setResults] = useState<Recommendation[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [usingFallback, setUsingFallback] = useState(false);
 
   const useLocation = () => {
     if (!navigator.geolocation) {
@@ -122,13 +137,52 @@ function RecommendPanel({
     );
   };
 
-  const submit = () => {
+  const submit = async () => {
     setLoading(true);
+    setErrorMsg(null);
+    setUsingFallback(false);
     const input: SoilInputs = { n, p, k, ph, temp, rainfall, season };
-    setTimeout(() => {
+    try {
+      const data = await apiRecommend({
+        N: n, P: p, K: k,
+        temperature: temp,
+        humidity,
+        ph,
+        rainfall,
+      });
+      const list = (data.crops || []).slice(0, 3);
+      const recs: Recommendation[] = list.map((name, i) => {
+        const matched = findCropByName(name);
+        const crop = matched ?? {
+          id: name.toLowerCase().replace(/\s+/g, "-"),
+          name,
+          emoji: "🌱",
+          seasons: [season],
+          n: [n, n], p: [p, p], k: [k, k],
+          ph: [ph, ph], temp: [temp, temp], rainfall: [rainfall, rainfall],
+          yieldPerHa: [0, 0], fertilizerKgPerHa: [0, 0], pesticideLPerHa: [0, 0],
+          whyShort: data.message || "Recommended by the model based on your inputs.",
+          sowingMonths: "—",
+        };
+        return {
+          crop,
+          score: Math.max(60, 95 - i * 12),
+          reasons: [
+            matched?.whyShort ?? `Model picked ${name} for your conditions.`,
+            data.message ? data.message : `Ranked #${i + 1} of ${list.length} by the recommendation model.`,
+            matched ? `Best sown: ${matched.sowingMonths}.` : "Check local sowing calendar before planting.",
+          ],
+        };
+      });
+      setResults(recs);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setErrorMsg(`Couldn't reach the backend (${msg}). Showing offline recommendations instead.`);
+      setUsingFallback(true);
       setResults(recommendCrops(input));
+    } finally {
       setLoading(false);
-    }, 600);
+    }
   };
 
   return (
@@ -171,6 +225,7 @@ function RecommendPanel({
           <SliderRow label="Potassium (K)" value={k} setValue={setK} min={0} max={150} unit="kg/ha" />
           <SliderRow label="Soil pH" value={ph} setValue={setPh} min={3} max={10} step={0.1} unit="" />
           <SliderRow label="Temperature" value={temp} setValue={setTemp} min={5} max={45} unit="°C" />
+          <SliderRow label="Humidity" value={humidity} setValue={setHumidity} min={10} max={100} unit="%" />
           <SliderRow label="Rainfall" value={rainfall} setValue={setRainfall} min={100} max={2500} step={10} unit="mm" />
 
           <Button onClick={submit} disabled={loading} className="w-full rounded-xl h-12 bg-primary hover:bg-primary/90 mt-2">
@@ -198,9 +253,17 @@ function RecommendPanel({
 
           {results && (
             <div>
+              {errorMsg && (
+                <div className="mb-4 flex items-start gap-2 rounded-xl border border-accent/40 bg-accent/10 p-3 text-xs text-foreground">
+                  <AlertTriangle className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-widest text-primary">Top 3 for {season}</p>
+                  <p className="text-xs font-bold uppercase tracking-widest text-primary">
+                    Top 3 for {season} {usingFallback ? "· offline" : "· live"}
+                  </p>
                   <h4 className="font-display text-2xl font-semibold">Best crops for your field</h4>
                 </div>
               </div>
@@ -281,20 +344,71 @@ function RecommendationCard({ rec, rank, onPickCrop }: { rec: Recommendation; ra
 function YieldPanel({ cropId, setCropId, onAsk }: { cropId: string; setCropId: (v: string) => void; onAsk: () => void }) {
   const [area, setArea] = useState(5);
   const [tempRange, setTempRange] = useState(27);
-  const report: YieldReport = useMemo(() => {
-    // condition factor: small bonus near ideal temp
-    const c = CROPS.find((x) => x.id === cropId)!;
-    const mid = (c.temp[0] + c.temp[1]) / 2;
-    const factor = Math.max(0.7, 1 - Math.abs(tempRange - mid) / 30);
-    return predictYield(cropId, area, factor);
-  }, [cropId, area, tempRange]);
-
+  const [report, setReport] = useState<YieldReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [usingFallback, setUsingFallback] = useState(false);
   const crop = CROPS.find((c) => c.id === cropId)!;
 
+  const localReport = useMemo<YieldReport>(() => {
+    const mid = (crop.temp[0] + crop.temp[1]) / 2;
+    const factor = Math.max(0.7, 1 - Math.abs(tempRange - mid) / 30);
+    return predictYield(cropId, area, factor);
+  }, [cropId, area, tempRange, crop]);
+
+  const fetchYield = async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    setUsingFallback(false);
+    try {
+      const data = await apiYield({
+        crop: crop.name,
+        area_ha: area,
+        temperature: tempRange,
+        method: "iqr",
+        narrow_pct: 0.12,
+      });
+      const num = (v: number | null, fb: number) => (v == null ? fb : +v.toFixed(2));
+      const yLo = num(data.yield_per_ha_range?.[0], localReport.perHa[0]);
+      const yHi = num(data.yield_per_ha_range?.[1], localReport.perHa[1]);
+      const tLo = num(data.total_yield_range?.[0], localReport.total[0]);
+      const tHi = num(data.total_yield_range?.[1], localReport.total[1]);
+      const fLo = num(data.total_fertilizer_range?.[0], localReport.fertilizer[0]);
+      const fHi = num(data.total_fertilizer_range?.[1], localReport.fertilizer[1]);
+      const pLo = num(data.total_pesticide_range?.[0], localReport.pesticide[0]);
+      const pHi = num(data.total_pesticide_range?.[1], localReport.pesticide[1]);
+      setReport({
+        perHa: [yLo, yHi],
+        total: [tLo, tHi],
+        fertilizer: [Math.round(fLo), Math.round(fHi)],
+        pesticide: [pLo, pHi],
+        summary:
+          data.message ||
+          `For ${area} ha of ${crop.name}, expect roughly ${yLo}–${yHi} tonnes per hectare — total about ${tLo}–${tHi} tonnes.`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setErrorMsg(`Couldn't reach the backend (${msg}). Showing offline estimate instead.`);
+      setUsingFallback(true);
+      setReport(localReport);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Auto-fetch on input change (debounced)
+  useEffect(() => {
+    const t = setTimeout(fetchYield, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cropId, area, tempRange]);
+
+  const shown = report ?? localReport;
+
   const chartData = [
-    { name: "Low", value: report.total[0], fill: "hsl(var(--primary-glow))" },
-    { name: "Expected", value: (report.total[0] + report.total[1]) / 2, fill: "hsl(var(--primary))" },
-    { name: "High", value: report.total[1], fill: "hsl(var(--accent))" },
+    { name: "Low", value: shown.total[0], fill: "hsl(var(--primary-glow))" },
+    { name: "Expected", value: (shown.total[0] + shown.total[1]) / 2, fill: "hsl(var(--primary))" },
+    { name: "High", value: shown.total[1], fill: "hsl(var(--accent))" },
   ];
 
   return (
@@ -325,7 +439,7 @@ function YieldPanel({ cropId, setCropId, onAsk }: { cropId: string; setCropId: (
 
           <div className="rounded-2xl bg-secondary/60 p-4 border border-border/60">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">In simple words</p>
-            <p className="text-sm leading-relaxed">{report.summary}</p>
+            <p className="text-sm leading-relaxed">{shown.summary}</p>
           </div>
 
           <Button onClick={onAsk} variant="outline" className="w-full rounded-xl h-11">
@@ -337,14 +451,23 @@ function YieldPanel({ cropId, setCropId, onAsk }: { cropId: string; setCropId: (
       <div className="lg:col-span-3 p-6 sm:p-8 bg-hero relative">
         <div className="absolute inset-0 bg-sun opacity-50 pointer-events-none" />
         <div className="relative">
-          <p className="text-xs font-bold uppercase tracking-widest text-primary">Your report</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-primary">
+            Your report {loading ? "· updating…" : usingFallback ? "· offline" : "· live"}
+          </p>
           <h4 className="font-display text-2xl font-semibold mb-5">{crop.emoji} {crop.name} · {area} ha</h4>
 
+          {errorMsg && (
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-accent/40 bg-accent/10 p-3 text-xs text-foreground">
+              <AlertTriangle className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3 mb-5">
-            <StatCard label="Yield / hectare" value={`${report.perHa[0]}–${report.perHa[1]}`} unit="tonnes" highlight />
-            <StatCard label="Total harvest" value={`${report.total[0]}–${report.total[1]}`} unit="tonnes" />
-            <StatCard label="Fertilizer (NPK)" value={`${report.fertilizer[0]}–${report.fertilizer[1]}`} unit="kg total" />
-            <StatCard label="Pesticide" value={`${report.pesticide[0]}–${report.pesticide[1]}`} unit="L total" />
+            <StatCard label="Yield / hectare" value={`${shown.perHa[0]}–${shown.perHa[1]}`} unit="tonnes" highlight />
+            <StatCard label="Total harvest" value={`${shown.total[0]}–${shown.total[1]}`} unit="tonnes" />
+            <StatCard label="Fertilizer (NPK)" value={`${shown.fertilizer[0]}–${shown.fertilizer[1]}`} unit="kg total" />
+            <StatCard label="Pesticide" value={`${shown.pesticide[0]}–${shown.pesticide[1]}`} unit="L total" />
           </div>
 
           <div className="bg-card rounded-2xl border border-border/60 p-4">
