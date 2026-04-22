@@ -362,7 +362,7 @@ function YieldPanel({ cropId, setCropId, onAsk }: { cropId: string; setCropId: (
     setUsingFallback(false);
     try {
       const data = await apiYield({
-        crop: crop.name,
+        crop: crop.id,
         area_ha: area,
         temperature: tempRange,
         method: "iqr",
