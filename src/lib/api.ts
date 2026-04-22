@@ -60,7 +60,7 @@ async function postJSON<T>(path: string, body: unknown, timeoutMs = 8000): Promi
 }
 
 export const apiRecommend = (body: RecommendRequest) =>
-  postJSON<RecommendResponse>("/recomend", body);
+  postJSON<RecommendResponse>("/recommend", body);
 
 export const apiYield = (body: YieldRequest) =>
   postJSON<YieldResponse>("/yield", body);
