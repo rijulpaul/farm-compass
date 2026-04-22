@@ -119,9 +119,12 @@ function RecommendPanel({
   const [k, setK] = useState(50);
   const [ph, setPh] = useState(6.5);
   const [temp, setTemp] = useState(27);
+  const [humidity, setHumidity] = useState(65);
   const [rainfall, setRainfall] = useState(900);
   const [results, setResults] = useState<Recommendation[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [usingFallback, setUsingFallback] = useState(false);
 
   const useLocation = () => {
     if (!navigator.geolocation) {
@@ -134,13 +137,52 @@ function RecommendPanel({
     );
   };
 
-  const submit = () => {
+  const submit = async () => {
     setLoading(true);
+    setErrorMsg(null);
+    setUsingFallback(false);
     const input: SoilInputs = { n, p, k, ph, temp, rainfall, season };
-    setTimeout(() => {
+    try {
+      const data = await apiRecommend({
+        N: n, P: p, K: k,
+        temperature: temp,
+        humidity,
+        ph,
+        rainfall,
+      });
+      const list = (data.crops || []).slice(0, 3);
+      const recs: Recommendation[] = list.map((name, i) => {
+        const matched = findCropByName(name);
+        const crop = matched ?? {
+          id: name.toLowerCase().replace(/\s+/g, "-"),
+          name,
+          emoji: "🌱",
+          seasons: [season],
+          n: [n, n], p: [p, p], k: [k, k],
+          ph: [ph, ph], temp: [temp, temp], rainfall: [rainfall, rainfall],
+          yieldPerHa: [0, 0], fertilizerKgPerHa: [0, 0], pesticideLPerHa: [0, 0],
+          whyShort: data.message || "Recommended by the model based on your inputs.",
+          sowingMonths: "—",
+        };
+        return {
+          crop,
+          score: Math.max(60, 95 - i * 12),
+          reasons: [
+            matched?.whyShort ?? `Model picked ${name} for your conditions.`,
+            data.message ? data.message : `Ranked #${i + 1} of ${list.length} by the recommendation model.`,
+            matched ? `Best sown: ${matched.sowingMonths}.` : "Check local sowing calendar before planting.",
+          ],
+        };
+      });
+      setResults(recs);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setErrorMsg(`Couldn't reach the backend (${msg}). Showing offline recommendations instead.`);
+      setUsingFallback(true);
       setResults(recommendCrops(input));
+    } finally {
       setLoading(false);
-    }, 600);
+    }
   };
 
   return (
@@ -183,6 +225,7 @@ function RecommendPanel({
           <SliderRow label="Potassium (K)" value={k} setValue={setK} min={0} max={150} unit="kg/ha" />
           <SliderRow label="Soil pH" value={ph} setValue={setPh} min={3} max={10} step={0.1} unit="" />
           <SliderRow label="Temperature" value={temp} setValue={setTemp} min={5} max={45} unit="°C" />
+          <SliderRow label="Humidity" value={humidity} setValue={setHumidity} min={10} max={100} unit="%" />
           <SliderRow label="Rainfall" value={rainfall} setValue={setRainfall} min={100} max={2500} step={10} unit="mm" />
 
           <Button onClick={submit} disabled={loading} className="w-full rounded-xl h-12 bg-primary hover:bg-primary/90 mt-2">
@@ -210,9 +253,17 @@ function RecommendPanel({
 
           {results && (
             <div>
+              {errorMsg && (
+                <div className="mb-4 flex items-start gap-2 rounded-xl border border-accent/40 bg-accent/10 p-3 text-xs text-foreground">
+                  <AlertTriangle className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-5">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-widest text-primary">Top 3 for {season}</p>
+                  <p className="text-xs font-bold uppercase tracking-widest text-primary">
+                    Top 3 for {season} {usingFallback ? "· offline" : "· live"}
+                  </p>
                   <h4 className="font-display text-2xl font-semibold">Best crops for your field</h4>
                 </div>
               </div>
