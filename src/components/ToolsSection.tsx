@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from "react";
-import { Sprout, BarChart3, MessageCircle, MapPin, Wand2, Send, Leaf, Bot, User, ArrowRight } from "lucide-react";
+import { Sprout, BarChart3, MessageCircle, MapPin, Wand2, Send, Leaf, Bot, User, ArrowRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,18 @@ import {
   predictYield,
   assistantReply,
 } from "@/lib/farming";
+import { apiRecommend, apiYield } from "@/lib/api";
+
+// Map an arbitrary backend crop name string to one of our local CROP entries
+// (so we can show emoji, sowing info, and "why this crop" reasons).
+function findCropByName(name: string) {
+  const n = name.toLowerCase().trim();
+  return (
+    CROPS.find((c) => c.name.toLowerCase() === n) ||
+    CROPS.find((c) => c.id.toLowerCase() === n) ||
+    CROPS.find((c) => c.name.toLowerCase().includes(n) || n.includes(c.id.toLowerCase()))
+  );
+}
 
 type Tool = "recommend" | "yield" | "chat";
 
